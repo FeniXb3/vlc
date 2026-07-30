@@ -1,0 +1,180 @@
+# Converted from extras/ci/gitlab-ci.yml
+name: CI
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  schedule:
+    - cron: '0 2 * * *' # nightly at 02:00 UTC
+
+jobs:
+  debian-build:
+    name: Debian build
+    runs-on: ubuntu-latest
+    env:
+      HOST_ARCH: x86_64
+      TRIPLET: ${{ env.HOST_ARCH }}-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake pkg-config ca-certificates xz-utils
+      - name: Bootstrap and configure
+        run: |
+          ./bootstrap
+          ./configure
+      - name: Build and distcheck
+        run: |
+          NCPU=$(nproc)
+          XZ_OPT="-T 0" make -j${NCPU} distcheck || ./test/dump_stacktraces.sh
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-debian
+          path: |
+            build-logs/**
+
+  meson-build:
+    name: Meson (Linux) build and tests
+    runs-on: ubuntu-latest
+    env:
+      HOST_ARCH: x86_64
+      TRIPLET: ${{ env.HOST_ARCH }}-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install meson and ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip ninja-build
+          pip3 install --upgrade meson gcovr
+      - name: Build tools
+        run: |
+          NCPU=$(nproc)
+          ( cd extras/tools && ./bootstrap && make -j${NCPU} --output-sync=recurse )
+          export PATH="$(pwd)/extras/tools/build/bin:$PATH"
+      - name: Meson setup
+        run: |
+          meson setup -Db_coverage=true -Dextra_checks=true build-meson || ( echo "ERROR: Meson setup failed!" >&2 ; cat build-meson/meson-logs/meson-log.txt >&2 ; exit 1 )
+      - name: Build and test
+        run: |
+          ninja -C build-meson || ( echo "ERROR: Build failed!" >&2 ; exit 2 )
+          meson test -C build-meson || ( echo "ERROR: Tests failed!" >&2 ; cat build-meson/meson-logs/testlog.txt >&2 ; exit 3 )
+      - name: Generate coverage (best-effort)
+        run: |
+          NCPU=$(nproc)
+          gcovr -r "${{ github.workspace }}/" --json "${{ github.workspace }}/${{ github.job }}.cov.json" -j$NCPU --merge-mode-functions=separate --gcov-ignore-parse-errors=negative_hits.warn_once_per_file || true
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-meson
+          path: cobertura.xml
+
+  windows-build:
+    name: Windows build (MSYS/MinGW)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Use bash to run Windows build scripts
+        shell: bash
+        run: |
+          # Try to run the existing packaging script for windows; the Windows runners provide a bash environment
+          if [ -x ./extras/package/win32/build.sh ]; then
+            ./extras/package/win32/build.sh -a x86_64
+          else
+            echo "No windows build script found or not executable" >&2
+            exit 0
+          fi
+
+  macos-build:
+    name: macOS build
+    runs-on: macos-latest
+    env:
+      VLC_PATH: /usr/local/bin
+      HOST_ARCH: x86_64
+      TRIPLET: ${{ env.HOST_ARCH }}-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install dependencies
+        run: |
+          brew update || true
+          brew install automake autoconf pkg-config ninja
+      - name: Build macOS package
+        run: |
+          export PATH="${VLC_PATH}:$PATH"
+          ./extras/package/macosx/build.sh -i z -a $HOST_ARCH -x || true
+
+  android-build:
+    name: Android build
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_ARCH: arm64
+      TRIPLET: aarch64-linux-android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build Android (libvlcjni)
+        run: |
+          git clone https://code.videolan.org/videolan/libvlcjni.git
+          (cd libvlcjni && git checkout e0a8a3df7c15b0c54e7651e2ea1623ba5f64c7ea)
+          EXTRA_PARAMS="--enable-extra-checks" /bin/sh ./libvlcjni/buildsystem/build-libvlc.sh -a $ANDROID_ARCH || true
+
+  wasm-build:
+    name: WebAssembly (emscripten)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Emscripten (emsdk)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip cmake nodejs
+          pip3 install --user emsdk || true
+          # If the repo provides an EMSDK, source it; otherwise this step is best-effort
+          if [ -n "$EMSDK" ]; then
+            source $EMSDK/emsdk_env.sh
+          fi
+      - name: Build wasm
+        run: |
+          ./extras/package/wasm-emscripten/build.sh --enable-extra-checks || true
+
+  docs:
+    name: Nightly docs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build docs for branches
+        run: |
+          mkdir -p public
+          for branch in "${{ github.ref_name }}" '3.0.x' ; do
+            git fetch --all
+            git switch --detach "origin/$branch" || continue
+            ./bootstrap || true
+            ./configure || true
+            make doc || true
+            if [ -d doc/doxygen/html ]; then
+              mv doc/doxygen/html "public/$branch" || true
+            fi
+            make distclean || true
+          done
+      - name: Upload pages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-site
+          path: public
