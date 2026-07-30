@@ -1919,7 +1919,7 @@ static int DtsCheckSync( const uint8_t *p_peek, unsigned *pi_samples )
 
     vlc_dts_header_t dts;
     if( vlc_dts_header_Parse( &dts, p_peek, VLC_DTS_HEADER_SIZE ) == VLC_SUCCESS
-     && dts.i_frame_size > 0 && dts.i_frame_size <= 8192 )
+     && dts.i_frame_size > 0 && dts.i_frame_size <= 8192 * 2)
     {
         if( pi_samples )
             *pi_samples = dts.i_frame_length;

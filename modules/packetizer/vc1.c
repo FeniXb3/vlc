@@ -482,7 +482,7 @@ static block_t *ParseIDU( void *p_private, bool *pb_ts_used, block_t *p_frag )
             const size_t i_potential_width  = GetWBE( &p_frag->p_buffer[4] );
             const size_t i_potential_height = GetWBE( &p_frag->p_buffer[6] );
 
-            if( i_potential_width >= 2  && i_potential_width <= 8192 &&
+            if( i_potential_width >= 2  && i_potential_width <= 8192 * 2 &&
                 i_potential_height >= 2 && i_potential_height <= 8192 )
             {
                 if( ( p_v->i_width <= 0 && p_v->i_height <= 0  ) ||

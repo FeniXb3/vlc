@@ -216,7 +216,7 @@ static inline void VoutResetChronoLocked(vout_thread_sys_t *sys)
 
 static bool VoutCheckFormat(const video_format_t *src)
 {
-    if (src->i_width == 0  || src->i_width  > 8192 ||
+    if (src->i_width == 0  || src->i_width  > 8192 * 2 ||
         src->i_height == 0 || src->i_height > 8192)
         return false;
     if (src->i_sar_num <= 0 || src->i_sar_den <= 0)

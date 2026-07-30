@@ -316,7 +316,7 @@ static int lavc_GetVideoFormat(decoder_t *dec, video_format_t *restrict fmt,
         avcodec_align_dimensions2(ctx, &width, &height, aligns);
     }
 
-    if( width == 0 || height == 0 || width > 8192 || height > 8192 ||
+    if( width == 0 || height == 0 || width > 8192 * 2 || height > 8192 ||
         width < ctx->width || height < ctx->height )
     {
         msg_Err(dec, "Invalid frame size %dx%d vsz %dx%d",
